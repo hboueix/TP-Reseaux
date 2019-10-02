@@ -120,4 +120,230 @@ reddit.map.fastly.net.  29      IN      A       151.101.193.140
 reddit.map.fastly.net.  29      IN      A       151.101.65.140
 ```
 
-Ce sont donc bien les DNS renseignés sur la machine qui sont utilisés. Dans "Answer Section", répartition de charges
+Ce sont donc bien les DNS renseignés sur la machine qui sont utilisés. Dans "Answer Section", on peut remarquer que plusieurs adresses IP ce qui correspond à une répartition de charges serveur chez Reddit.  
+
+- 🌞 afficher l'état actuel du firewall
+
+```
+[hbooex@TP-reseau ~]$ sudo firewall-cmd --list-all
+[sudo] password for hbooex: 
+public (active)
+  target: default
+  icmp-block-inversion: no 
+  interfaces: enp0s3 enp0s8
+  sources:
+  services: cockpit dhcpv6-client ssh
+  ports: 22/tcp
+  protocols:
+  masquerade: no
+  forward-ports:
+  source-ports:
+  icmp-blocks:
+  rich rules:
+```
+Le firewall filtre donc les interfaces enp0s3 et enp0s8, seul le port 22 est autorisé pour "écouter" des demandes de connexions ssh externes.   
+   - 🐙 sous CentOS8, ce n'est plus iptables qui est utilisé pour manipuler le filtrage réseau mais nftables. Jouez un peu avec nft et affichez les "vraies" règles firewall (firewalld, manipulé avec firewall-cmd n'est qu'une surcouche à nft)
+
+   ```
+   [hbooex@TP-reseau ~]$ sudo nft list ruleset
+   table ip filter {
+        chain INPUT {
+                type filter hook input priority 0; policy accept;  
+        }
+
+        chain FORWARD {
+                type filter hook forward priority 0; policy accept;
+        }
+
+        chain OUTPUT {
+                type filter hook output priority 0; policy accept; 
+        }
+   }
+                  
+...
+                         
+      chain nat_POST_public_deny {
+        }
+
+        chain nat_POST_public_allow {
+        }
+
+        chain nat_POST_public_post {
+        }
+   }
+   ```
+   
+## II. Edit configuration
+
+### 1. Configuration cartes réseau
+
+- 🌞 modifier la configuration de la carte réseau privée
+
+   - modifier la configuration de la carte réseau privée pour avoir une nouvelle IP statique définie par vos soins
+
+
+- ajouter une nouvelle carte réseau dans un DEUXIEME réseau privé UNIQUEMENT privé
+
+   - 🌞 dans la VM définir une IP statique pour cette nouvelle carte
+
+
+- vérifier vos changements
+
+   - afficher les nouvelles cartes/IP
+```
+[hbooex@TP-reseau ~]$ ip a
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host
+       valid_lft forever preferred_lft forever
+2: enp0s3: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP group default qlen 1000
+    link/ether 08:00:27:17:69:88 brd ff:ff:ff:ff:ff:ff
+    inet 10.0.2.15/24 brd 10.0.2.255 scope global dynamic noprefixroute enp0s3
+       valid_lft 85218sec preferred_lft 85218sec
+    inet6 fe80::18f2:de7e:b56:a0e5/64 scope link noprefixroute
+       valid_lft forever preferred_lft forever
+3: enp0s8: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP group default qlen 1000
+    link/ether 08:00:27:94:f3:90 brd ff:ff:ff:ff:ff:ff
+    inet 192.168.100.10/24 brd 192.168.100.255 scope global noprefixroute enp0s8
+       valid_lft forever preferred_lft forever
+    inet6 fe80::a00:27ff:fe94:f390/64 scope link
+       valid_lft forever preferred_lft forever
+4: enp0s9: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP group default qlen 1000
+    link/ether 08:00:27:4d:6d:82 brd ff:ff:ff:ff:ff:ff
+    inet 192.168.200.10/24 brd 192.168.200.255 scope global noprefixroute enp0s9
+       valid_lft forever preferred_lft forever
+    inet6 fe80::a00:27ff:fe4d:6d82/64 scope link
+       valid_lft forever preferred_lft forever
+
+[hbooex@TP-reseau ~]$ nmcli d
+DEVICE  TYPE      STATE      CONNECTION 
+enp0s3  ethernet  connected  enp0s3
+enp0s8  ethernet  connected  enp0s8
+enp0s9  ethernet  connected  enp0s9
+lo      loopback  unmanaged  --
+```
+   - vérifier les nouvelles tables ARP/de routage
+```
+[hbooex@TP-reseau ~]$ ip r s
+default via 10.0.2.2 dev enp0s3 proto dhcp metric 100
+10.0.2.0/24 dev enp0s3 proto kernel scope link src 10.0.2.15 metric 100
+192.168.100.0/24 dev enp0s8 proto kernel scope link src 192.168.100.10 metric 103
+192.168.200.0/24 dev enp0s9 proto kernel scope link src 192.168.200.10 metric 102
+
+[hbooex@TP-reseau ~]$ arp -e
+Address                  HWtype  HWaddress           Flags Mask            Iface
+_gateway                 ether   52:54:00:12:35:02   C                     enp0s3
+192.168.100.1            ether   0a:00:27:00:00:16   C                     enp0s8
+```
+
+L'interface enp0s8 apparaît sur notre table ARP, contrairement à l'interface enp0s9, car c'est l'interface que j'utilise pour me connecter en ssh.
+
+### 2. Serveur SSH
+
+- 🌞 modifier la configuration du système pour que le serveur SSH tourne sur le port 2222  
+
+Il suffit de modifier le fichier `/etc/ssh/sshd_config` pour changer de port.
+
+   - adapter la configuration du firewall (fermer l'ancien port, ouvrir le nouveau)
+```
+[hbooex@TP-reseau ~]$ sudo firewall-cmd --permanent --add-port=2222/tcp
+success
+[hbooex@TP-reseau ~]$ sudo firewall-cmd --permanent --remove-port=22/tcp
+success
+[hbooex@TP-reseau ~]$ sudo firewall-cmd --reload
+success
+[hbooex@TP-reseau ~]$ sudo firewall-cmd --list-all
+public (active)
+  target: default
+  icmp-block-inversion: no
+  interfaces: enp0s3 enp0s8 enp0s9
+  services: cockpit dhcpv6-client ssh
+  ports: 2222/tcp
+  protocols:
+  masquerade: no
+  forward-ports:
+  source-ports:
+  icmp-blocks:
+  rich rules:
+[hbooex@TP-reseau ~]$ sudo ss -4tln
+State                     Recv-Q                     Send-Q                                           Local Address:Port                                           Peer Address:Port
+LISTEN                    0                          128                                                    0.0.0.0:2222                                                0.0.0.0:*
+```
+
+- 🌞 analyser les trames de connexion au serveur SSH
+
+   - intercepter avec Wireshark et/ou tcpdump le trafic entre le client SSH et le serveur SSH
+   détailler l'établissement de la connexion
+
+   - doivent figurer au moins : échanges ARP, 3-way handshake TCP
+
+- une fois la connexion établie, choisir une trame du trafic SSH et détailler son contenu
+
+
+```
+[hbooex@clone1 ~]$ sudo tcpdump -i enp0s8
+tcpdump: verbose output suppressed, use -v or -vv for full protocol decode
+listening on enp0s8, link-type EN10MB (Ethernet), capture size 262144 bytes
+16:45:38.294796 IP 192.168.100.20.44946 > clone1.TP-reseau-1.EtherNet/IP-1: Flags [S], seq 193922150, win 29200, options [mss 1460,sackOK,TS val 3839309149 ecr 0,nop,wscale 7], length 0
+16:45:38.294906 ARP, Request who-has 192.168.100.20 tell clone1.TP-reseau-1, length 28
+16:45:38.296563 ARP, Reply 192.168.100.20 is-at 08:00:27:a9:3e:e7 (oui Unknown), length 46
+16:45:38.296573 IP clone1.TP-reseau-1.EtherNet/IP-1 > 192.168.100.20.44946: Flags [S.], seq 2807030402, ack 193922151, win 28960, options [mss 1460,sackOK,TS val 599196557 ecr 3839309149,nop,wscale 
+7], length 0
+16:45:38.297053 IP 192.168.100.20.44946 > clone1.TP-reseau-1.EtherNet/IP-1: Flags [.], ack 1, win 229, options [nop,nop,TS val 3839309152 ecr 599196557], length 0
+16:45:38.330171 IP 192.168.100.20.44946 > clone1.TP-reseau-1.EtherNet/IP-1: Flags [P.], seq 1:22, ack 1, win 229, options [nop,nop,TS val 3839309185 ecr 599196557], length 21
+
+...
+
+^C
+39 packets captured
+39 packets received by filter
+0 packets dropped by kernel
+
+```
+
+On distingue bien l'échange ARP entre les 2 machines. Je pense avoir repèrer les échanges TCP syn, syn-ack et ack (respectivement flag [S], [S.] et [.]) mais j'ai du mal à détailler le contenu d'une trame SSH.  
+
+## III. Routage simple
+
+
+
+
+## IV. Autres applications et métrologie
+
+### 1. Commandes
+
+- jouer avec iftop
+
+   - expliquer son utilisation et imaginer un cas où iftop peut être utile
+
+Cette commande nous permet de monitorer en temps réel notre utilisation de la bande passante sur une interface.
+
+### 2. Cockpit
+
+- 🌞 mettre en place cockpit sur la VM1
+
+   - trouver (à l'aide d'une commande shell) sur quel port (TCP ou UDP) écoute Cockpit
+   - vérifier que le port est ouvert dans le firewall
+
+```
+[hbooex@clone1 ~]$ sudo ss -ltu
+Netid   State     Recv-Q    Send-Q            Local Address:Port                  Peer Address:Port    
+udp     UNCONN    0         0              10.0.2.15%enp0s3:bootpc                     0.0.0.0:*       
+tcp     LISTEN    0         128                     0.0.0.0:EtherNet/IP-1              0.0.0.0:*       
+tcp     LISTEN    0         128                           *:websm                            *:*       
+tcp     LISTEN    0         128                        [::]:EtherNet/IP-1                 [::]:*       
+[hbooex@clone1 ~]$ sudo ss -ltun
+Netid    State      Recv-Q     Send-Q               Local Address:Port           Peer Address:Port     
+udp      UNCONN     0          0                 10.0.2.15%enp0s3:68                  0.0.0.0:*        
+tcp      LISTEN     0          128                        0.0.0.0:2222                0.0.0.0:*        
+tcp      LISTEN     0          128                              *:9090                      *:*        
+tcp      LISTEN     0          128                           [::]:2222                   [::]:*        
+```
+
+- 🌞 explorer Cockpit, plus spécifiquement ce qui est en rapport avec le réseau  
+
+On peut se connecter à l'interface web de cockpit à l'adresse du clone1 sur le port 9090. Cela nous donne accès à tout un tas d'infos pour administrer notre serveur.
+
+### 3. Netdata
