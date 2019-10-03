@@ -297,7 +297,7 @@ listening on enp0s8, link-type EN10MB (Ethernet), capture size 262144 bytes
 ...
 
 ^C
-39 packets captured
+39 packet captured
 39 packets received by filter
 0 packets dropped by kernel
 
@@ -307,6 +307,23 @@ On distingue bien l'échange ARP entre les 2 machines. Je pense avoir repèrer l
 
 ## III. Routage simple
 
+- 🌞 To Do
+
+   - Tableau récapitulatif des IPs
+
+Machines | net1 | net2 | NAT
+--- | --- | --- | ---
+Clone1 | 192.168.10.10 | 
+Clone2 |  | 192.168.20.20 | 
+Router | 192.168.10.1 | 192.168.20.1 | dhcp
+
+   - Configuration (bref) de VM1 et VM2
+
+On modifie les fichiers `/etc/sysconfig/network-scripts/ifcfg-enp0s[0-9]`sur les 2 VMs pour leur donner une IP statique dans leur réseau.
+
+   - Configuration routeur
+   - Preuve que VM1 passe par le routeur pour joindre internet
+   - Une (ou deux ? ;) ) capture(s) réseau ainsi que des explications qui mettent en évidence le routage effectué par le routeur
 
 
 
